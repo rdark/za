@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Build binaries
+        run: |
+          # Linux amd64
+          GOOS=linux GOARCH=amd64 go build -ldflags "-s -w -X main.version=${{ github.ref_name }}" -o za-linux-amd64
+
+          # Linux arm64
+          GOOS=linux GOARCH=arm64 go build -ldflags "-s -w -X main.version=${{ github.ref_name }}" -o za-linux-arm64
+
+          # macOS amd64
+          GOOS=darwin GOARCH=amd64 go build -ldflags "-s -w -X main.version=${{ github.ref_name }}" -o za-darwin-amd64
+
+          # macOS arm64 (Apple Silicon)
+          GOOS=darwin GOARCH=arm64 go build -ldflags "-s -w -X main.version=${{ github.ref_name }}" -o za-darwin-arm64
+
+          # Windows amd64
+          GOOS=windows GOARCH=amd64 go build -ldflags "-s -w -X main.version=${{ github.ref_name }}" -o za-windows-amd64.exe
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            za-linux-amd64
+            za-linux-arm64
+            za-darwin-amd64
+            za-darwin-arm64
+            za-windows-amd64.exe
+          draft: false
+          prerelease: false
+          generate_release_notes: true

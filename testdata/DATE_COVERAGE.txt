@@ -1,0 +1,81 @@
+Za Test Data - Date Coverage Map
+================================================================================
+
+Legend: ✓ = Entry exists, ✗ = Gap (intentional)
+
+November 2024
+─────────────
+Nov 25 (Mon)  ✓  [Entry] - Early planning
+Nov 26-Dec 18 ✗  [22-day gap] - Tests 30-day window boundary
+
+December 2024
+─────────────
+Dec 19 (Thu)  ✓  [Entry] - Last day before holiday
+Dec 20 (Fri)  ✓  [Entry] - Holiday starts
+Dec 21-Jan 5  ✗  [16-day gap] - Holiday break (Christmas/New Year)
+
+January 2025
+────────────
+Jan 6  (Mon)  ✓  [Entry] - Return from holiday
+Jan 7  (Tue)  ✓  [Entry] - Sprint work
+Jan 8  (Wed)  ✓  [Entry] - Sprint work
+Jan 9  (Thu)  ✗  [1-day gap] - Tests single-day fallback
+Jan 10 (Fri)  ✓  [Entry] - Sprint work
+Jan 11 (Sat)  ✗  [Weekend gap]
+Jan 12 (Sun)  ✗  [Weekend gap]
+Jan 13 (Mon)  ✓  [Entry] - Sprint work, production deployment
+Jan 14 (Tue)  ✓  [Entry] - Rate limiting work starts
+Jan 15-Feb 2  ✗  [19-day gap] - Vacation to Australia 🦘
+
+February 2025
+─────────────
+Feb 3  (Mon)  ✓  [Entry] - Return from vacation (Week 1 starts)
+Feb 4  (Tue)  ✓  [Entry] - Catch up, meet new team member (Week 1)
+Feb 5  (Wed)  ✓  [Entry] - Audit logging implementation (Week 1)
+Feb 6-9       ✗  [4-day gap] - Thu-Sun (tests week boundary)
+Feb 10 (Mon)  ✓  [Entry] - New week starts (Week 2)
+
+================================================================================
+
+Total Entries: 13 journal + 13 standup = 26 files
+Date Range: Nov 25, 2024 → Feb 10, 2025 (~78 days)
+Coverage: 13 days with entries, 65 days gaps
+Longest Gap: 22 days (Nov 26 - Dec 18)
+
+Gap Types:
+1. Boundary test gap (22 days) - tests near 30-day window limit
+2. Holiday break (16 days) - realistic winter holiday scenario
+3. Extended vacation (19 days) - realistic international vacation
+4. Single day (1 day) - tests adjacent-day fallback
+5. Weekends (2 days) - tests weekend handling
+
+Search Window Test Cases:
+- Within window: Any date Jan 6-Feb 5 should find entries
+- Near boundary: Dec 19 is 18 days before Jan 6 (within window)
+- At boundary: Nov 25 is 42 days before Jan 6 (outside window)
+- After gap: Searching Jan 9 should find Jan 8
+- After vacation: Searching Jan 30 should find Jan 14 (16 days back)
+
+Link Fixing Scenarios:
+- Standard adjacent: Jan 7 → Jan 6 (Yesterday), Jan 7 → Jan 8 (Tomorrow)
+- Gap handling: Jan 8 → Jan 10 (Tomorrow, skipping Jan 9)
+- Weekend skip: Jan 10 → Jan 13 (skipping weekend)
+- Holiday links: Dec 20 → Jan 6 ("Return from Holiday")
+- Vacation links: Jan 14 → Feb 3 ("Before Vacation" / "After Vacation")
+
+Goals Copying Test Cases (Feb 3-5, Feb 10):
+─────────────────────────────────────────────
+Week 1 (Feb 3-9):
+- Feb 3 (Mon): Initial Goals of the Week and Goals of the Day
+  * Goals of the Day has mix: [ ] unchecked, [x] checked, plain bullets
+- Feb 4 (Tue): Same week - should copy Goals of the Week
+  * Should also copy unfinished Goals of the Day from Feb 3
+  * Includes: [ ] unchecked items and plain bullets
+  * Excludes: [x] completed items
+- Feb 5 (Wed): Same week - should copy Goals of the Week
+  * Should copy unfinished Goals of the Day from Feb 4
+
+Week 2 (Feb 10-16):
+- Feb 10 (Mon): NEW WEEK - should NOT copy Goals of the Week from Feb 5
+  * Should still copy unfinished Goals of the Day from last entry (Feb 5)
+  * Tests week boundary: same week vs. different week behavior

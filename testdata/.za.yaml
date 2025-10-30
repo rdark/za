@@ -1,0 +1,39 @@
+# Za (Zettelkasten Augmentation) Configuration
+# This is a sample configuration file for the test data
+
+journal:
+  dir: ./testdata/journal
+  work_done_sections:
+    - "work completed"
+    - "worked on"
+  skip_text: []
+  link_previous_titles:
+    - "Yesterday"
+    - "Previous"
+    - "Last Week"
+  link_next_titles:
+    - "Tomorrow"
+    - "Next"
+    - "Next Week"
+  create:
+    cmd: ""  # Example: "zk new --title 'Daily Log {date}' journal/"
+
+standup:
+  dir: ./testdata/standup
+  work_done_section: "Worked on yesterday"
+  skip_text: []
+  link_previous_titles:
+    - "Yesterday"
+    - "Previous"
+  link_next_titles:
+    - "Tomorrow"
+    - "Next"
+  create:
+    cmd: ""  # Example: "zk new --title 'Standup {date}' standup/"
+
+# General settings
+search_window_days: 30
+
+# Company tag to add to weekday entries (Monday-Friday)
+# Set to empty string to disable
+company_tag: "acme"
