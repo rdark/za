@@ -212,8 +212,8 @@ title: Test
 tags: ["daily", "journal"]
 ---
 Content`,
-			tagToAdd:    "company:acme",
-			wantExact:   `tags: ["daily", "journal", "company:acme"]`,
+			tagToAdd:  "company:acme",
+			wantExact: `tags: ["daily", "journal", "company:acme"]`,
 		},
 		{
 			name: "tags with special characters",
@@ -222,8 +222,8 @@ title: Test
 tags: ["status:active", "type:task"]
 ---
 Content`,
-			tagToAdd:    "company:acme",
-			wantExact:   `tags: ["status:active", "type:task", "company:acme"]`,
+			tagToAdd:  "company:acme",
+			wantExact: `tags: ["status:active", "type:task", "company:acme"]`,
 		},
 		{
 			name: "single tag originally",
@@ -232,8 +232,8 @@ title: Test
 tags: ["daily"]
 ---
 Content`,
-			tagToAdd:    "company:acme",
-			wantExact:   `tags: ["daily", "company:acme"]`,
+			tagToAdd:  "company:acme",
+			wantExact: `tags: ["daily", "company:acme"]`,
 		},
 	}
 
