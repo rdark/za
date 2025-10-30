@@ -190,7 +190,7 @@ func TestLoadConfigDefaults(t *testing.T) {
 	// Create a temporary directory without any config file
 	tmpDir := t.TempDir()
 	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
+	defer func() { _ = os.Chdir(oldDir) }()
 
 	// Change to temp directory so no config file is found
 	if err := os.Chdir(tmpDir); err != nil {
