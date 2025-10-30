@@ -2,7 +2,6 @@
 
 [![CI](https://github.com/rdark/za/workflows/CI/badge.svg)](https://github.com/rdark/za/actions?query=workflow%3ACI)
 [![Release](https://github.com/rdark/za/workflows/Release/badge.svg)](https://github.com/rdark/za/actions?query=workflow%3ARelease)
-[![Go Report Card](https://goreportcard.com/badge/github.com/rdark/za)](https://goreportcard.com/report/github.com/rdark/za)
 
 A CLI tool for managing daily journal entries and standup notes in a zettelkasten-style knowledge base.
 
