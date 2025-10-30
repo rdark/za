@@ -7,10 +7,12 @@ A CLI tool for managing daily journal entries and standup notes in a zettelkaste
 
 ## Features
 
-- **Automatic work extraction** from journal to standup notes
-- **Smart link fixing** for relative date references (Yesterday/Tomorrow)
-- **Gap handling** for weekends and holidays
-- **Template-based note generation** via external tools (e.g., [zk](https://github.com/zk-org/zk))
+- **Automatic work extraction** - Populate standups with yesterday's completed work and today's goals
+- **Goals management** - Copy unfinished goals between journal entries
+- **Smart link fixing** - Resolve relative date references (Yesterday/Tomorrow) and cross-references
+- **Slack-ready updates** - Generate concise daily updates in Slack-compatible format
+- **Gap handling** - Handles weekends and holidays automatically
+- **Template-based generation** - Integrates with external tools like [zk](https://github.com/zk-org/zk)
 
 ## Installation
 
@@ -43,8 +45,8 @@ za generate-config
 # Then start using:
 
 za generate-journal           # Create today's journal
-za generate-standup          # Create standup with yesterday's work
-za journal-work-done         # Extract work for Slack
+za generate-standup          # Create standup with yesterday's work and today's goals
+za standup-slack             # Generate Slack-ready daily update
 za fix-links journal/2025-01-15.md  # Fix stale links
 ```
 
@@ -74,16 +76,26 @@ search_window_days: 30
 
 ```bash
 za generate-journal              # Creates journal with fixed links
-za generate-standup              # Creates standup with work from yesterday
+za generate-standup              # Creates standup with yesterday's work and today's goals
 za generate-standup --no-work    # Skip work extraction
 ```
 
-### Extract Work
+### Slack Updates
 
 ```bash
-za journal-work-done             # Today's work
-za journal-work-done 2025-01-15  # Specific date (with fallback)
-za standup-work-done             # From standup
+za standup-slack                 # Generate update for today
+za standup-slack 2025-01-15      # Generate update for specific date
+```
+
+Outputs a concise summary of yesterday's completed work and today's planned goals in Slack-compatible format:
+
+```
+previous:
+* Completed feature X
+* Fixed bug Y
+next:
+* Review code changes
+* Deploy to staging
 ```
 
 ### Fix Links
