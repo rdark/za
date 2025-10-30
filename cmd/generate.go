@@ -259,34 +259,105 @@ func runGenerateStandup(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// populateStandupWithWork extracts work from previous day's journal and appends to standup
+// populateStandupWithWork extracts work from previous day's journal and today's goals,
+// inserting them into the appropriate standup sections
 func populateStandupWithWork(standupDate time.Time, standupPath string) error {
-	// Find previous day's journal
-	previousDate := standupDate.AddDate(0, 0, -1)
 	journalDir, err := cfg.JournalDir()
 	if err != nil {
 		return err
 	}
 
-	journalPath, err := notes.FindNoteByDate(previousDate, notes.NoteTypeJournal, journalDir, cfg.SearchWindowDays)
+	// Find previous day's journal for "Worked on Yesterday" section
+	previousDate := standupDate.AddDate(0, 0, -1)
+	prevJournalPath, err := notes.FindNoteByDate(previousDate, notes.NoteTypeJournal, journalDir, cfg.SearchWindowDays)
 	if err != nil {
 		return fmt.Errorf("could not find previous journal: %w", err)
 	}
 
-	fmt.Printf("Found previous journal: %s\n", journalPath)
+	fmt.Printf("Found previous journal: %s\n", prevJournalPath)
 
-	// Parse journal
+	// Parse previous journal
 	parser := markdown.NewParser()
-	doc, err := parser.ParseFile(journalPath)
+	prevDoc, err := parser.ParseFile(prevJournalPath)
 	if err != nil {
-		return fmt.Errorf("failed to parse journal: %w", err)
+		return fmt.Errorf("failed to parse previous journal: %w", err)
 	}
 
-	// Extract work sections
-	sections := doc.FindSectionsByHeadings(cfg.Journal.WorkDoneSections)
-	if len(sections) == 0 {
-		fmt.Println("No work sections found in previous journal")
-		return nil
+	// Extract work sections from previous journal
+	workSections := prevDoc.FindSectionsByHeadings(cfg.Journal.WorkDoneSections)
+
+	// Extract completed goals from previous journal's "Goals of the Day"
+	var completedGoals []string
+	prevGoalsSection := prevDoc.FindSectionByHeading("Goals of the Day")
+	if prevGoalsSection != nil && strings.TrimSpace(prevGoalsSection.Content) != "" {
+		items := markdown.ParseGoalItems(prevGoalsSection.Content)
+		for _, item := range items {
+			// Only include completed checkbox items
+			if item.HasCheckbox && item.Checked {
+				completedGoals = append(completedGoals, item.Text)
+			}
+		}
+	}
+
+	// Build content for "Worked on Yesterday" section
+	var yesterdayContent strings.Builder
+	if len(completedGoals) > 0 {
+		fmt.Printf("Adding %d completed goal(s) from yesterday\n", len(completedGoals))
+		for _, goal := range completedGoals {
+			yesterdayContent.WriteString(fmt.Sprintf("* %s\n", goal))
+		}
+		// No extra newline - keep goals and work items together
+	}
+	for _, section := range workSections {
+		sectionContent := strings.TrimSpace(section.Content)
+		if sectionContent != "" {
+			yesterdayContent.WriteString(sectionContent)
+			yesterdayContent.WriteString("\n\n")
+		}
+	}
+
+	// Find today's journal for "Working on Today" section
+	var todayGoals []string
+	todayJournalPath, err := notes.FindNoteByDate(standupDate, notes.NoteTypeJournal, journalDir, cfg.SearchWindowDays)
+	if err == nil {
+		// Verify this is actually today's journal, not a fallback to an earlier date
+		foundDate, err := notes.ParseDateFromFilename(todayJournalPath)
+		if err == nil {
+			// Compare just the date parts (year, month, day) not the full timestamp
+			standupY, standupM, standupD := standupDate.Date()
+			foundY, foundM, foundD := foundDate.Date()
+			if standupY == foundY && standupM == foundM && standupD == foundD {
+				fmt.Printf("Found today's journal: %s\n", todayJournalPath)
+
+				todayDoc, err := parser.ParseFile(todayJournalPath)
+				if err == nil {
+					todayGoalsSection := todayDoc.FindSectionByHeading("Goals of the Day")
+					if todayGoalsSection != nil && strings.TrimSpace(todayGoalsSection.Content) != "" {
+						items := markdown.ParseGoalItems(todayGoalsSection.Content)
+						// Include all goals (completed and uncompleted)
+						for _, item := range items {
+							if item.HasCheckbox || item.Text != "" {
+								todayGoals = append(todayGoals, item.Text)
+							}
+						}
+					}
+				}
+			} else {
+				fmt.Println("No today's journal found yet (found fallback from earlier date)")
+			}
+		}
+	} else {
+		fmt.Println("No today's journal found yet")
+	}
+
+	// Build content for "Working on Today" section
+	var todayContent strings.Builder
+	if len(todayGoals) > 0 {
+		fmt.Printf("Adding %d goal(s) for today\n", len(todayGoals))
+		for _, goal := range todayGoals {
+			todayContent.WriteString(fmt.Sprintf("* %s\n", goal))
+		}
+		todayContent.WriteString("\n")
 	}
 
 	// Read current standup content
@@ -295,36 +366,33 @@ func populateStandupWithWork(standupDate time.Time, standupPath string) error {
 		return fmt.Errorf("failed to read standup file: %w", err)
 	}
 
-	// Append work to standup file
-	file, err := os.OpenFile(standupPath, os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to open standup file: %w", err)
-	}
-	defer func() {
-		if cerr := file.Close(); cerr != nil && err == nil {
-			err = fmt.Errorf("failed to close standup file: %w", cerr)
-		}
-	}()
+	// Insert content into standup sections
+	newContent := string(standupContent)
 
-	// Add a section header if standup doesn't already have work section
-	content := string(standupContent)
-	if !strings.Contains(strings.ToLower(content), strings.ToLower(cfg.Standup.WorkDoneSection)) {
-		if _, err := fmt.Fprintf(file, "\n# %s\n\n", cfg.Standup.WorkDoneSection); err != nil {
-			return fmt.Errorf("failed to write work section header: %w", err)
+	if yesterdayContent.Len() > 0 {
+		// Add leading newline for spacing after existing content (like links)
+		content := "\n" + yesterdayContent.String()
+		newContent, err = insertIntoStandupSection(newContent, cfg.Standup.WorkDoneSection, content)
+		if err != nil {
+			return fmt.Errorf("failed to insert yesterday's work: %w", err)
 		}
 	}
 
-	// Append extracted work
-	for _, section := range sections {
-		sectionContent := strings.TrimSpace(section.Content)
-		if sectionContent != "" {
-			if _, err := fmt.Fprintf(file, "%s\n\n", sectionContent); err != nil {
-				return fmt.Errorf("failed to write section content: %w", err)
-			}
+	if todayContent.Len() > 0 {
+		// Add leading newline for spacing after existing content (like links)
+		content := "\n" + todayContent.String()
+		newContent, err = insertIntoStandupSection(newContent, "Working on Today", content)
+		if err != nil {
+			return fmt.Errorf("failed to insert today's goals: %w", err)
 		}
 	}
 
-	fmt.Printf("✓ Populated standup with work from %s\n", filepath.Base(journalPath))
+	// Write updated content back to file
+	if err := os.WriteFile(standupPath, []byte(newContent), 0644); err != nil {
+		return fmt.Errorf("failed to write standup file: %w", err)
+	}
+
+	fmt.Printf("✓ Populated standup with work from %s\n", filepath.Base(prevJournalPath))
 	return nil
 }
 
@@ -649,6 +717,97 @@ func insertAfterFrontmatter(fileContent, insertContent string) (string, error) {
 
 	// Write rest of file
 	for i := frontmatterEnd + 1; i < len(lines); i++ {
+		result.WriteString(lines[i])
+		if i < len(lines)-1 {
+			result.WriteString("\n")
+		}
+	}
+
+	return result.String(), nil
+}
+
+// insertIntoStandupSection inserts content into a specific section of a standup file
+func insertIntoStandupSection(fileContent, sectionHeading, insertContent string) (string, error) {
+	lines := strings.Split(fileContent, "\n")
+
+	// Find the section heading (case-insensitive, supports both # and ## headings)
+	sectionIndex := -1
+	sectionLevel := 0
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// Check for h1 or h2 heading
+		if strings.HasPrefix(trimmed, "##") {
+			headingText := strings.TrimSpace(strings.TrimPrefix(trimmed, "##"))
+			if strings.EqualFold(headingText, sectionHeading) {
+				sectionIndex = i
+				sectionLevel = 2
+				break
+			}
+		} else if strings.HasPrefix(trimmed, "#") {
+			headingText := strings.TrimSpace(strings.TrimPrefix(trimmed, "#"))
+			if strings.EqualFold(headingText, sectionHeading) {
+				sectionIndex = i
+				sectionLevel = 1
+				break
+			}
+		}
+	}
+
+	if sectionIndex == -1 {
+		return fileContent, fmt.Errorf("section '%s' not found", sectionHeading)
+	}
+
+	// Find where to insert: after the heading and any existing content, before next heading
+	insertIndex := sectionIndex + 1
+
+	// Skip blank lines after heading
+	for insertIndex < len(lines) && strings.TrimSpace(lines[insertIndex]) == "" {
+		insertIndex++
+	}
+
+	// Skip existing content until we hit another heading of same or higher level
+	for insertIndex < len(lines) {
+		trimmed := strings.TrimSpace(lines[insertIndex])
+
+		// Check if this is a heading
+		if strings.HasPrefix(trimmed, "#") {
+			// Count heading level
+			level := 0
+			for _, ch := range trimmed {
+				if ch == '#' {
+					level++
+				} else {
+					break
+				}
+			}
+
+			// If same or higher level heading, insert before it
+			if level <= sectionLevel {
+				// Back up to skip trailing blank lines
+				for insertIndex > sectionIndex+1 && strings.TrimSpace(lines[insertIndex-1]) == "" {
+					insertIndex--
+				}
+				break
+			}
+		}
+
+		insertIndex++
+	}
+
+	// Build result
+	var result strings.Builder
+
+	// Write everything up to insertion point
+	for i := 0; i < insertIndex; i++ {
+		result.WriteString(lines[i])
+		result.WriteString("\n")
+	}
+
+	// Write inserted content
+	result.WriteString(insertContent)
+
+	// Write rest of file
+	for i := insertIndex; i < len(lines); i++ {
 		result.WriteString(lines[i])
 		if i < len(lines)-1 {
 			result.WriteString("\n")
