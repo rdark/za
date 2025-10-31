@@ -532,26 +532,31 @@ func populateJournalGoals(currentDate time.Time, journalPath string) error {
 	}
 
 	// 2. Copy unfinished "Goals of the Day" items (SECOND)
-	dayGoalsSection := prevDoc.FindSectionByHeading("Goals of the Day")
-	if dayGoalsSection != nil && strings.TrimSpace(dayGoalsSection.Content) != "" {
-		// Parse both checkbox items and plain bullet points
-		items := markdown.ParseGoalItems(dayGoalsSection.Content)
-		unfinishedItems := markdown.FilterUnfinishedGoals(items)
+	// Always add this section, even if empty
+	currentDaySection := currentDoc.FindSectionByHeading("Goals of the Day")
+	shouldAddDayGoals := currentDaySection == nil || !hasGoalContent(currentDaySection.Content)
+
+	if shouldAddDayGoals {
+		dayGoalsSection := prevDoc.FindSectionByHeading("Goals of the Day")
+		var unfinishedItems []markdown.GoalItem
+
+		if dayGoalsSection != nil && strings.TrimSpace(dayGoalsSection.Content) != "" {
+			// Parse both checkbox items and plain bullet points
+			items := markdown.ParseGoalItems(dayGoalsSection.Content)
+			unfinishedItems = markdown.FilterUnfinishedGoals(items)
+		}
 
 		if len(unfinishedItems) > 0 {
-			// Check if current journal has this section with content
-			currentDaySection := currentDoc.FindSectionByHeading("Goals of the Day")
-			shouldAdd := currentDaySection == nil || !hasGoalContent(currentDaySection.Content)
-
-			if shouldAdd {
-				fmt.Printf("Copying %d unfinished goal(s) from yesterday\n", len(unfinishedItems))
-				formattedItems := markdown.FormatGoalItems(unfinishedItems)
-				goalsToAdd.WriteString("## Goals of the Day\n\n")
-				goalsToAdd.WriteString(formattedItems)
-				goalsToAdd.WriteString("\n\n")
-				sectionsAdded = true
-			}
+			fmt.Printf("Copying %d unfinished goal(s) from yesterday\n", len(unfinishedItems))
+			formattedItems := markdown.FormatGoalItems(unfinishedItems)
+			goalsToAdd.WriteString("## Goals of the Day\n\n")
+			goalsToAdd.WriteString(formattedItems)
+			goalsToAdd.WriteString("\n\n")
+		} else {
+			fmt.Println("Adding empty Goals of the Day section")
+			goalsToAdd.WriteString("## Goals of the Day\n\n")
 		}
+		sectionsAdded = true
 	}
 
 	// Insert goals sections after Daily Log heading if any were added
@@ -577,6 +582,9 @@ func populateJournalGoals(currentDate time.Time, journalPath string) error {
 // insertAfterDailyLogSection inserts content after the Daily Log h1 section,
 // removing any empty Goals sections that already exist
 func insertAfterDailyLogSection(fileContent, insertContent string) (string, error) {
+	// Check which sections we're inserting
+	insertingGoalsOfDay := strings.Contains(insertContent, "## Goals of the Day")
+	insertingGoalsOfWeek := strings.Contains(insertContent, "## Goals of the Week")
 	lines := strings.Split(fileContent, "\n")
 
 	// Find the first h1 heading (Daily Log)
@@ -625,6 +633,7 @@ func insertAfterDailyLogSection(fileContent, insertContent string) (string, erro
 		if trimmed == "## Goals of the Week" || trimmed == "## Goals of the Day" {
 			// Find the extent of this section (until next heading or end of file)
 			sectionStart := i
+			sectionHeading := trimmed
 			i++
 
 			// Collect content until next heading
@@ -639,13 +648,27 @@ func insertAfterDailyLogSection(fileContent, insertContent string) (string, erro
 				i++
 			}
 
-			// Check if section has meaningful content
-			if hasGoalContent(strings.Join(sectionContent, "\n")) {
+			// Decide whether to keep this section:
+			// - If we're inserting a new version of this section, remove empty existing ones
+			// - If we're not inserting this section, preserve it even if empty
+			// - Always preserve sections with actual content
+			hasContent := hasGoalContent(strings.Join(sectionContent, "\n"))
+			shouldKeep := hasContent
+
+			if !shouldKeep {
+				// Check if we should preserve this empty section
+				if sectionHeading == "## Goals of the Day" && !insertingGoalsOfDay {
+					shouldKeep = true
+				} else if sectionHeading == "## Goals of the Week" && !insertingGoalsOfWeek {
+					shouldKeep = true
+				}
+			}
+
+			if shouldKeep {
 				// Keep the section
 				filteredLines = append(filteredLines, lines[sectionStart])
 				filteredLines = append(filteredLines, sectionContent...)
 			}
-			// If section is empty, we skip it (don't append to filteredLines)
 		} else {
 			filteredLines = append(filteredLines, lines[i])
 			i++
