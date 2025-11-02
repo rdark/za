@@ -37,3 +37,9 @@ search_window_days: 30
 # Company tag to add to weekday entries (Monday-Friday)
 # Set to empty string to disable
 company_tag: "acme"
+
+# GitHub integration (optional)
+# Requires GitHub CLI (gh) to be installed and authenticated
+github:
+  enabled: false
+  org: "my-org"  # GitHub organization to search for PRs
