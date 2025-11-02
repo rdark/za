@@ -661,11 +661,16 @@ func TestPopulateStandupWithWork_NoPreviousJournal(t *testing.T) {
 	defer func() { os.Stdout = oldStdout }()
 
 	err := populateStandupWithWork(standupDate, standupPath)
-	if err == nil {
-		t.Fatal("expected error when no previous journal exists")
+	if err != nil {
+		t.Fatalf("expected no error when no previous journal exists, got: %v", err)
 	}
 
-	if !strings.Contains(err.Error(), "could not find previous journal") {
-		t.Errorf("expected 'could not find previous journal' error, got: %v", err)
+	// Verify standup file was not modified (since there's no work to populate)
+	content, err := os.ReadFile(standupPath)
+	if err != nil {
+		t.Fatalf("failed to read standup file: %v", err)
+	}
+	if string(content) != standupContent {
+		t.Errorf("standup file was unexpectedly modified: got %q, want %q", string(content), standupContent)
 	}
 }

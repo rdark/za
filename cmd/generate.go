@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rdark/za/internal/github"
 	"github.com/rdark/za/internal/links"
 	"github.com/rdark/za/internal/markdown"
 	"github.com/rdark/za/internal/notes"
@@ -244,8 +245,12 @@ func runGenerateStandup(cmd *cobra.Command, args []string) error {
 	if !skipWorkExtraction {
 		fmt.Println("\nExtracting work from previous journal...")
 		if err := populateStandupWithWork(targetDate, expectedPath); err != nil {
-			fmt.Fprintf(os.Stderr, "⚠ Failed to extract work: %v\n", err)
-			// Don't fail the command if work extraction fails
+			// If work extraction fails, delete the created standup file and return the error
+			fmt.Fprintf(os.Stderr, "Failed to extract work: %v\n", err)
+			if removeErr := os.Remove(expectedPath); removeErr != nil {
+				fmt.Fprintf(os.Stderr, "⚠ Failed to clean up standup file: %v\n", removeErr)
+			}
+			return fmt.Errorf("failed to populate standup: %w", err)
 		}
 	}
 
@@ -269,32 +274,35 @@ func populateStandupWithWork(standupDate time.Time, standupPath string) error {
 
 	// Find previous day's journal for "Worked on Yesterday" section
 	previousDate := standupDate.AddDate(0, 0, -1)
+	var workSections []markdown.Section
+	var completedGoals []string
+	parser := markdown.NewParser()
+
 	prevJournalPath, err := notes.FindNoteByDate(previousDate, notes.NoteTypeJournal, journalDir, cfg.SearchWindowDays)
 	if err != nil {
-		return fmt.Errorf("could not find previous journal: %w", err)
-	}
+		// No previous journal found - this is OK, just skip work extraction from journal
+		fmt.Println("No previous journal found to copy work from")
+	} else {
+		fmt.Printf("Found previous journal: %s\n", prevJournalPath)
 
-	fmt.Printf("Found previous journal: %s\n", prevJournalPath)
+		// Parse previous journal
+		prevDoc, err := parser.ParseFile(prevJournalPath)
+		if err != nil {
+			return fmt.Errorf("failed to parse previous journal: %w", err)
+		}
 
-	// Parse previous journal
-	parser := markdown.NewParser()
-	prevDoc, err := parser.ParseFile(prevJournalPath)
-	if err != nil {
-		return fmt.Errorf("failed to parse previous journal: %w", err)
-	}
+		// Extract work sections from previous journal
+		workSections = prevDoc.FindSectionsByHeadings(cfg.Journal.WorkDoneSections)
 
-	// Extract work sections from previous journal
-	workSections := prevDoc.FindSectionsByHeadings(cfg.Journal.WorkDoneSections)
-
-	// Extract completed goals from previous journal's "Goals of the Day"
-	var completedGoals []string
-	prevGoalsSection := prevDoc.FindSectionByHeading("Goals of the Day")
-	if prevGoalsSection != nil && strings.TrimSpace(prevGoalsSection.Content) != "" {
-		items := markdown.ParseGoalItems(prevGoalsSection.Content)
-		for _, item := range items {
-			// Only include completed checkbox items
-			if item.HasCheckbox && item.Checked {
-				completedGoals = append(completedGoals, item.Text)
+		// Extract completed goals from previous journal's "Goals of the Day"
+		prevGoalsSection := prevDoc.FindSectionByHeading("Goals of the Day")
+		if prevGoalsSection != nil && strings.TrimSpace(prevGoalsSection.Content) != "" {
+			items := markdown.ParseGoalItems(prevGoalsSection.Content)
+			for _, item := range items {
+				// Only include completed checkbox items (as plain text, no checkbox)
+				if item.HasCheckbox && item.Checked {
+					completedGoals = append(completedGoals, item.Text)
+				}
 			}
 		}
 	}
@@ -306,18 +314,37 @@ func populateStandupWithWork(standupDate time.Time, standupPath string) error {
 		for _, goal := range completedGoals {
 			yesterdayContent.WriteString(fmt.Sprintf("* %s\n", goal))
 		}
-		// No extra newline - keep goals and work items together
 	}
 	for _, section := range workSections {
 		sectionContent := strings.TrimSpace(section.Content)
 		if sectionContent != "" {
 			yesterdayContent.WriteString(sectionContent)
-			yesterdayContent.WriteString("\n\n")
+			yesterdayContent.WriteString("\n")
+		}
+	}
+
+	// Add GitHub PRs created yesterday if integration is enabled
+	if cfg.GitHub.Enabled {
+		if !github.IsAvailable() {
+			return fmt.Errorf("GitHub integration enabled but gh CLI not available")
+		}
+
+		fmt.Println("Fetching GitHub PRs created yesterday...")
+		ghClient := github.NewClient(cfg.GitHub.Org)
+		prs, err := ghClient.GetPRsCreatedYesterday(standupDate)
+		if err != nil {
+			return fmt.Errorf("failed to fetch GitHub PRs created yesterday: %w", err)
+		}
+
+		if len(prs) > 0 {
+			fmt.Printf("Adding %d PR(s) created yesterday\n", len(prs))
+			prContent := github.FormatPRsAsBulletPoints(prs, false)
+			yesterdayContent.WriteString(prContent)
 		}
 	}
 
 	// Find today's journal for "Working on Today" section
-	var todayGoals []string
+	var todayGoalItems []markdown.GoalItem
 	todayJournalPath, err := notes.FindNoteByDate(standupDate, notes.NoteTypeJournal, journalDir, cfg.SearchWindowDays)
 	if err == nil {
 		// Verify this is actually today's journal, not a fallback to an earlier date
@@ -334,10 +361,10 @@ func populateStandupWithWork(standupDate time.Time, standupPath string) error {
 					todayGoalsSection := todayDoc.FindSectionByHeading("Goals of the Day")
 					if todayGoalsSection != nil && strings.TrimSpace(todayGoalsSection.Content) != "" {
 						items := markdown.ParseGoalItems(todayGoalsSection.Content)
-						// Include all goals (completed and uncompleted)
+						// Include all goals (completed and uncompleted) with their checkbox state
 						for _, item := range items {
 							if item.HasCheckbox || item.Text != "" {
-								todayGoals = append(todayGoals, item.Text)
+								todayGoalItems = append(todayGoalItems, item)
 							}
 						}
 					}
@@ -352,12 +379,28 @@ func populateStandupWithWork(standupDate time.Time, standupPath string) error {
 
 	// Build content for "Working on Today" section
 	var todayContent strings.Builder
-	if len(todayGoals) > 0 {
-		fmt.Printf("Adding %d goal(s) for today\n", len(todayGoals))
-		for _, goal := range todayGoals {
-			todayContent.WriteString(fmt.Sprintf("* %s\n", goal))
+	if len(todayGoalItems) > 0 {
+		fmt.Printf("Adding %d goal(s) for today\n", len(todayGoalItems))
+		for _, item := range todayGoalItems {
+			// Always format as plain bullets (no checkboxes) in standup
+			todayContent.WriteString(fmt.Sprintf("* %s\n", item.Text))
 		}
-		todayContent.WriteString("\n")
+	}
+
+	// Add GitHub PRs open and unreviewed if integration is enabled
+	if cfg.GitHub.Enabled {
+		fmt.Println("Fetching open and unreviewed GitHub PRs...")
+		ghClient := github.NewClient(cfg.GitHub.Org)
+		prs, err := ghClient.GetPRsOpenAndUnreviewed(standupDate)
+		if err != nil {
+			return fmt.Errorf("failed to fetch open and unreviewed GitHub PRs: %w", err)
+		}
+
+		if len(prs) > 0 {
+			fmt.Printf("Adding %d open and unreviewed PR(s)\n", len(prs))
+			prContent := github.FormatPRsAsBulletPoints(prs, true)
+			todayContent.WriteString(prContent)
+		}
 	}
 
 	// Read current standup content

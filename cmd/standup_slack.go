@@ -16,9 +16,9 @@ var standupSlackCmd = &cobra.Command{
 	Long: `Print a summary of yesterday's completed work and today's planned work
 in a format suitable for pasting into Slack.
 
-This command extracts:
-- Completed goals and work from yesterday's journal
-- Goals for today from today's journal
+This command reads from the standup file and extracts:
+- Work completed yesterday from "Worked on Yesterday" section
+- Planned work for today from "Working on Today" section
 
 Examples:
   za standup-slack                    # Generate update for today
@@ -44,75 +44,97 @@ func runStandupSlack(cmd *cobra.Command, args []string) error {
 		targetDate = time.Now()
 	}
 
-	journalDir, err := cfg.JournalDir()
+	standupDir, err := cfg.StandupDir()
 	if err != nil {
-		return fmt.Errorf("failed to get journal directory: %w", err)
+		return fmt.Errorf("failed to get standup directory: %w", err)
 	}
 
+	// Find today's standup
+	standupPath, err := notes.FindNoteByDate(targetDate, notes.NoteTypeStandup, standupDir, cfg.SearchWindowDays)
+	if err != nil {
+		return fmt.Errorf("no standup found for %s: %w", targetDate.Format(notes.DateFormat), err)
+	}
+
+	// Verify this is actually today's standup
+	foundDate, err := notes.ParseDateFromFilename(standupPath)
+	if err != nil {
+		return fmt.Errorf("failed to parse date from standup filename: %w", err)
+	}
+
+	targetY, targetM, targetD := targetDate.Date()
+	foundY, foundM, foundD := foundDate.Date()
+	if targetY != foundY || targetM != foundM || targetD != foundD {
+		return fmt.Errorf("no standup found for exact date %s (found %s)",
+			targetDate.Format(notes.DateFormat), foundDate.Format(notes.DateFormat))
+	}
+
+	// Parse standup file
 	parser := markdown.NewParser()
+	standupDoc, err := parser.ParseFile(standupPath)
+	if err != nil {
+		return fmt.Errorf("failed to parse standup file: %w", err)
+	}
 
-	// Extract yesterday's work
+	// Extract yesterday's work from "Worked on Yesterday" section
 	var yesterdayItems []string
-	previousDate := targetDate.AddDate(0, 0, -1)
-	prevJournalPath, err := notes.FindNoteByDate(previousDate, notes.NoteTypeJournal, journalDir, cfg.SearchWindowDays)
-	if err == nil {
-		prevDoc, err := parser.ParseFile(prevJournalPath)
-		if err == nil {
-			// Extract completed goals
-			prevGoalsSection := prevDoc.FindSectionByHeading("Goals of the Day")
-			if prevGoalsSection != nil && strings.TrimSpace(prevGoalsSection.Content) != "" {
-				items := markdown.ParseGoalItems(prevGoalsSection.Content)
-				for _, item := range items {
-					if item.HasCheckbox && item.Checked {
-						yesterdayItems = append(yesterdayItems, item.Text)
-					}
-				}
+	yesterdaySection := standupDoc.FindSectionByHeading(cfg.Standup.WorkDoneSection)
+	if yesterdaySection != nil && strings.TrimSpace(yesterdaySection.Content) != "" {
+		lines := strings.Split(yesterdaySection.Content, "\n")
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" {
+				continue
 			}
-
-			// Extract work sections
-			workSections := prevDoc.FindSectionsByHeadings(cfg.Journal.WorkDoneSections)
-			for _, section := range workSections {
-				sectionContent := strings.TrimSpace(section.Content)
-				if sectionContent != "" {
-					// Parse bullet points from work section
-					lines := strings.Split(sectionContent, "\n")
-					for _, line := range lines {
-						trimmed := strings.TrimSpace(line)
-						// Extract bullet points (both * and -)
-						if strings.HasPrefix(trimmed, "* ") {
-							yesterdayItems = append(yesterdayItems, strings.TrimPrefix(trimmed, "* "))
-						} else if strings.HasPrefix(trimmed, "- ") {
-							yesterdayItems = append(yesterdayItems, strings.TrimPrefix(trimmed, "- "))
-						}
-					}
-				}
+			// Skip navigation links (Yesterday, Today, Tomorrow, Standup, Daily)
+			if strings.HasPrefix(trimmed, "* [Yesterday") || strings.HasPrefix(trimmed, "* [Today") ||
+				strings.HasPrefix(trimmed, "* [Tomorrow") || strings.HasPrefix(trimmed, "* [Standup") ||
+				strings.HasPrefix(trimmed, "* [Daily") ||
+				strings.HasPrefix(trimmed, "- [Yesterday") || strings.HasPrefix(trimmed, "- [Today") ||
+				strings.HasPrefix(trimmed, "- [Tomorrow") || strings.HasPrefix(trimmed, "- [Standup") ||
+				strings.HasPrefix(trimmed, "- [Daily") {
+				continue
+			}
+			// Extract bullet points
+			var item string
+			if strings.HasPrefix(trimmed, "* ") {
+				item = strings.TrimSpace(strings.TrimPrefix(trimmed, "* "))
+			} else if strings.HasPrefix(trimmed, "- ") {
+				item = strings.TrimSpace(strings.TrimPrefix(trimmed, "- "))
+			}
+			if item != "" {
+				yesterdayItems = append(yesterdayItems, item)
 			}
 		}
 	}
 
-	// Extract today's goals
+	// Extract today's goals from "Working on Today" section
 	var todayItems []string
-	todayJournalPath, err := notes.FindNoteByDate(targetDate, notes.NoteTypeJournal, journalDir, cfg.SearchWindowDays)
-	if err == nil {
-		// Verify this is actually today's journal
-		foundDate, err := notes.ParseDateFromFilename(todayJournalPath)
-		if err == nil {
-			// Compare just the date parts
-			targetY, targetM, targetD := targetDate.Date()
-			foundY, foundM, foundD := foundDate.Date()
-			if targetY == foundY && targetM == foundM && targetD == foundD {
-				todayDoc, err := parser.ParseFile(todayJournalPath)
-				if err == nil {
-					todayGoalsSection := todayDoc.FindSectionByHeading("Goals of the Day")
-					if todayGoalsSection != nil && strings.TrimSpace(todayGoalsSection.Content) != "" {
-						items := markdown.ParseGoalItems(todayGoalsSection.Content)
-						for _, item := range items {
-							if item.Text != "" {
-								todayItems = append(todayItems, item.Text)
-							}
-						}
-					}
-				}
+	todaySection := standupDoc.FindSectionByHeading("Working on Today")
+	if todaySection != nil && strings.TrimSpace(todaySection.Content) != "" {
+		lines := strings.Split(todaySection.Content, "\n")
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" {
+				continue
+			}
+			// Skip navigation links (Yesterday, Today, Tomorrow, Standup, Daily)
+			if strings.HasPrefix(trimmed, "* [Yesterday") || strings.HasPrefix(trimmed, "* [Today") ||
+				strings.HasPrefix(trimmed, "* [Tomorrow") || strings.HasPrefix(trimmed, "* [Standup") ||
+				strings.HasPrefix(trimmed, "* [Daily") ||
+				strings.HasPrefix(trimmed, "- [Yesterday") || strings.HasPrefix(trimmed, "- [Today") ||
+				strings.HasPrefix(trimmed, "- [Tomorrow") || strings.HasPrefix(trimmed, "- [Standup") ||
+				strings.HasPrefix(trimmed, "- [Daily") {
+				continue
+			}
+			// Extract bullet points
+			var item string
+			if strings.HasPrefix(trimmed, "* ") {
+				item = strings.TrimSpace(strings.TrimPrefix(trimmed, "* "))
+			} else if strings.HasPrefix(trimmed, "- ") {
+				item = strings.TrimSpace(strings.TrimPrefix(trimmed, "- "))
+			}
+			if item != "" {
+				todayItems = append(todayItems, item)
 			}
 		}
 	}

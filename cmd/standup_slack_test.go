@@ -14,56 +14,47 @@ import (
 
 func TestStandupSlack_WithBothDays(t *testing.T) {
 	tempDir := t.TempDir()
-	journalDir := filepath.Join(tempDir, "journal")
+	standupDir := filepath.Join(tempDir, "standup")
 
-	if err := os.MkdirAll(journalDir, 0755); err != nil {
-		t.Fatalf("failed to create journal dir: %v", err)
+	if err := os.MkdirAll(standupDir, 0755); err != nil {
+		t.Fatalf("failed to create standup dir: %v", err)
 	}
 
-	// Create yesterday's journal with completed work
-	yesterday := time.Date(2025, 1, 20, 0, 0, 0, 0, time.UTC)
-	yesterdayPath := filepath.Join(journalDir, yesterday.Format(notes.DateFormat)+".md")
-	yesterdayContent := `---
-title: Yesterday's Journal
+	// Create today's standup with work from yesterday and goals for today
+	today := time.Date(2025, 1, 21, 0, 0, 0, 0, time.UTC)
+	standupPath := filepath.Join(standupDir, today.Format(notes.DateFormat)+".md")
+	standupContent := `---
+title: Standup 2025-01-21
 ---
 
-## Goals of the Day
+# Standup 2025-01-21
 
-* [x] Complete feature X
-* [ ] Review PR #123
-* [x] Deploy to staging
+## Worked on Yesterday
 
-# Work Completed
+* [Yesterday](../journal/2025-01-20)
 
+* Complete feature X
+* Deploy to staging
 * Fixed bug in authentication
 * Updated API documentation
+
+## Working on Today
+
+* [Today](../journal/2025-01-21)
+
+* Review code changes
+* Test new feature
+* Update documentation
 `
-	if err := os.WriteFile(yesterdayPath, []byte(yesterdayContent), 0644); err != nil {
-		t.Fatalf("failed to create yesterday's journal: %v", err)
-	}
-
-	// Create today's journal with goals
-	today := time.Date(2025, 1, 21, 0, 0, 0, 0, time.UTC)
-	todayPath := filepath.Join(journalDir, today.Format(notes.DateFormat)+".md")
-	todayContent := `---
-title: Today's Journal
----
-
-## Goals of the Day
-
-* [ ] Review code changes
-* [ ] Test new feature
-* [x] Update documentation
-`
-	if err := os.WriteFile(todayPath, []byte(todayContent), 0644); err != nil {
-		t.Fatalf("failed to create today's journal: %v", err)
+	if err := os.WriteFile(standupPath, []byte(standupContent), 0644); err != nil {
+		t.Fatalf("failed to create standup: %v", err)
 	}
 
 	// Configure
 	cfg = &config.Config{
-		Journal: config.JournalConfig{
-			Dir:              journalDir,
-			WorkDoneSections: []string{"Work Completed"},
+		Standup: config.StandupConfig{
+			Dir:             standupDir,
+			WorkDoneSection: "Worked on Yesterday",
 		},
 		SearchWindowDays: 30,
 	}
@@ -140,31 +131,39 @@ title: Today's Journal
 
 func TestStandupSlack_NoYesterdayWork(t *testing.T) {
 	tempDir := t.TempDir()
-	journalDir := filepath.Join(tempDir, "journal")
+	standupDir := filepath.Join(tempDir, "standup")
 
-	if err := os.MkdirAll(journalDir, 0755); err != nil {
-		t.Fatalf("failed to create journal dir: %v", err)
+	if err := os.MkdirAll(standupDir, 0755); err != nil {
+		t.Fatalf("failed to create standup dir: %v", err)
 	}
 
-	// Only create today's journal
+	// Create today's standup with empty "Worked on Yesterday" section (only nav links) and today's goals
 	today := time.Date(2025, 1, 21, 0, 0, 0, 0, time.UTC)
-	todayPath := filepath.Join(journalDir, today.Format(notes.DateFormat)+".md")
-	todayContent := `---
-title: Today's Journal
+	standupPath := filepath.Join(standupDir, today.Format(notes.DateFormat)+".md")
+	standupContent := `---
+title: Standup 2025-01-21
 ---
 
-## Goals of the Day
+# Standup 2025-01-21
 
-* [ ] Review code changes
+## Worked on Yesterday
+
+* [Yesterday](../journal/2025-01-20)
+
+## Working on Today
+
+* [Today](../journal/2025-01-21)
+
+* Review code changes
 `
-	if err := os.WriteFile(todayPath, []byte(todayContent), 0644); err != nil {
-		t.Fatalf("failed to create today's journal: %v", err)
+	if err := os.WriteFile(standupPath, []byte(standupContent), 0644); err != nil {
+		t.Fatalf("failed to create standup: %v", err)
 	}
 
 	cfg = &config.Config{
-		Journal: config.JournalConfig{
-			Dir:              journalDir,
-			WorkDoneSections: []string{"Work Completed"},
+		Standup: config.StandupConfig{
+			Dir:             standupDir,
+			WorkDoneSection: "Worked on Yesterday",
 		},
 		SearchWindowDays: 30,
 	}
@@ -205,33 +204,39 @@ title: Today's Journal
 
 func TestStandupSlack_NoTodayGoals(t *testing.T) {
 	tempDir := t.TempDir()
-	journalDir := filepath.Join(tempDir, "journal")
+	standupDir := filepath.Join(tempDir, "standup")
 
-	if err := os.MkdirAll(journalDir, 0755); err != nil {
-		t.Fatalf("failed to create journal dir: %v", err)
+	if err := os.MkdirAll(standupDir, 0755); err != nil {
+		t.Fatalf("failed to create standup dir: %v", err)
 	}
 
-	// Only create yesterday's journal
-	yesterday := time.Date(2025, 1, 20, 0, 0, 0, 0, time.UTC)
-	yesterdayPath := filepath.Join(journalDir, yesterday.Format(notes.DateFormat)+".md")
-	yesterdayContent := `---
-title: Yesterday's Journal
+	// Create today's standup with yesterday's work but empty "Working on Today" section (only nav links)
+	today := time.Date(2025, 1, 21, 0, 0, 0, 0, time.UTC)
+	standupPath := filepath.Join(standupDir, today.Format(notes.DateFormat)+".md")
+	standupContent := `---
+title: Standup 2025-01-21
 ---
 
-# Work Completed
+# Standup 2025-01-21
+
+## Worked on Yesterday
+
+* [Yesterday](../journal/2025-01-20)
 
 * Fixed a bug
+
+## Working on Today
+
+* [Today](../journal/2025-01-21)
 `
-	if err := os.WriteFile(yesterdayPath, []byte(yesterdayContent), 0644); err != nil {
-		t.Fatalf("failed to create yesterday's journal: %v", err)
+	if err := os.WriteFile(standupPath, []byte(standupContent), 0644); err != nil {
+		t.Fatalf("failed to create standup: %v", err)
 	}
 
-	today := time.Date(2025, 1, 21, 0, 0, 0, 0, time.UTC)
-
 	cfg = &config.Config{
-		Journal: config.JournalConfig{
-			Dir:              journalDir,
-			WorkDoneSections: []string{"Work Completed"},
+		Standup: config.StandupConfig{
+			Dir:             standupDir,
+			WorkDoneSection: "Worked on Yesterday",
 		},
 		SearchWindowDays: 30,
 	}

@@ -8,6 +8,7 @@ A CLI tool for managing daily journal entries and standup notes in a zettelkaste
 ## Features
 
 - **Automatic work extraction** - Populate standups with yesterday's completed work and today's goals
+- **GitHub integration** - Automatically include PRs created yesterday and open/unreviewed PRs in standups
 - **Goals management** - Copy unfinished goals between journal entries
 - **Smart link fixing** - Resolve relative date references (Yesterday/Tomorrow) and cross-references
 - **Slack-ready updates** - Generate concise daily updates in Slack-compatible format
@@ -68,7 +69,23 @@ standup:
     cmd: "zk new --title 'Standup {date}' --print-path standup/"
 
 search_window_days: 30
+
+# GitHub integration (optional)
+# Requires GitHub CLI (gh) to be installed and authenticated
+github:
+  enabled: true
+  org: "my-org"  # GitHub organization to search for PRs
 ```
+
+### GitHub Integration
+
+The GitHub integration is optional and requires:
+1. [GitHub CLI (gh)](https://cli.github.com/) installed and authenticated
+2. Configuration in `.za.yaml` with `github.enabled: true` and your organization name
+
+When enabled, `generate-standup` will automatically:
+- Add PRs created yesterday (in any state) to "Worked on yesterday"
+- Add PRs opened in the last 7 days that are still open and unreviewed to "Working on today"
 
 ## Usage
 

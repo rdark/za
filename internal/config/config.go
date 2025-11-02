@@ -12,6 +12,7 @@ import (
 type Config struct {
 	Journal          JournalConfig `mapstructure:"journal"`
 	Standup          StandupConfig `mapstructure:"standup"`
+	GitHub           GitHubConfig  `mapstructure:"github"`
 	SearchWindowDays int           `mapstructure:"search_window_days"`
 	CompanyTag       string        `mapstructure:"company_tag"`
 }
@@ -41,6 +42,12 @@ type CreateCommand struct {
 	Cmd string `mapstructure:"cmd"`
 }
 
+// GitHubConfig contains configuration for GitHub integration
+type GitHubConfig struct {
+	Enabled bool   `mapstructure:"enabled"`
+	Org     string `mapstructure:"org"`
+}
+
 // DefaultConfig returns a configuration with sensible defaults
 func DefaultConfig() *Config {
 	return &Config{
@@ -59,6 +66,10 @@ func DefaultConfig() *Config {
 			LinkPreviousTitles: []string{"Yesterday", "Previous", "Last Week"},
 			LinkNextTitles:     []string{"Tomorrow", "Next", "Next Week"},
 			Create:             CreateCommand{Cmd: ""},
+		},
+		GitHub: GitHubConfig{
+			Enabled: false,
+			Org:     "",
 		},
 		SearchWindowDays: 30,
 		CompanyTag:       "acme",
@@ -132,6 +143,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("standup.link_next_titles", defaults.Standup.LinkNextTitles)
 	v.SetDefault("standup.create.cmd", defaults.Standup.Create.Cmd)
 
+	v.SetDefault("github.enabled", defaults.GitHub.Enabled)
+	v.SetDefault("github.org", defaults.GitHub.Org)
+
 	v.SetDefault("search_window_days", defaults.SearchWindowDays)
 	v.SetDefault("company_tag", defaults.CompanyTag)
 }
@@ -149,6 +163,9 @@ func (c *Config) Validate() error {
 	}
 	if len(c.Journal.WorkDoneSections) == 0 {
 		return fmt.Errorf("journal.work_done_sections must have at least one section")
+	}
+	if c.GitHub.Enabled && c.GitHub.Org == "" {
+		return fmt.Errorf("github.org is required when github.enabled is true")
 	}
 	return nil
 }
