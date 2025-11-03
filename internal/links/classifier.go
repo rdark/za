@@ -162,3 +162,8 @@ func (l *ClassifiedLink) NeedsFixing() bool {
 		return false
 	}
 }
+
+// IsNextLink returns true if this is a temporal "next" link
+func (l *ClassifiedLink) IsNextLink() bool {
+	return l.Type == LinkTypeTemporalNext
+}

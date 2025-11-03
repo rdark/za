@@ -155,6 +155,23 @@ func runGenerateJournal(cmd *cobra.Command, args []string) error {
 		// Don't fail the command if link fixing fails
 	}
 
+	// Fix links in previous journal to point to this new file
+	fmt.Println("\nFixing links in previous journal...")
+	if err := fixPreviousLinks(targetDate, notes.NoteTypeJournal, journalDir); err != nil {
+		fmt.Fprintf(os.Stderr, "⚠ Failed to fix previous journal links: %v\n", err)
+		// Don't fail the command if link fixing fails
+	}
+
+	// Fix cross-reference links in today's standup (if it exists)
+	fmt.Println("\nFixing cross-reference links in today's standup...")
+	standupDir, err := cfg.StandupDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "⚠ Failed to get standup directory: %v\n", err)
+	} else if err := fixCrossReferenceLinks(targetDate, notes.NoteTypeStandup, notes.NoteTypeJournal, standupDir); err != nil {
+		fmt.Fprintf(os.Stderr, "⚠ Failed to fix standup cross-reference links: %v\n", err)
+		// Don't fail the command if link fixing fails
+	}
+
 	return nil
 }
 
@@ -258,6 +275,23 @@ func runGenerateStandup(cmd *cobra.Command, args []string) error {
 	fmt.Println("\nFixing links...")
 	if err := fixLinksInFile(expectedPath); err != nil {
 		fmt.Fprintf(os.Stderr, "⚠ Failed to fix links: %v\n", err)
+		// Don't fail the command if link fixing fails
+	}
+
+	// Fix links in previous standup to point to this new file
+	fmt.Println("\nFixing links in previous standup...")
+	if err := fixPreviousLinks(targetDate, notes.NoteTypeStandup, standupDir); err != nil {
+		fmt.Fprintf(os.Stderr, "⚠ Failed to fix previous standup links: %v\n", err)
+		// Don't fail the command if link fixing fails
+	}
+
+	// Fix cross-reference links in today's journal (if it exists)
+	fmt.Println("\nFixing cross-reference links in today's journal...")
+	journalDir, err := cfg.JournalDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "⚠ Failed to get journal directory: %v\n", err)
+	} else if err := fixCrossReferenceLinks(targetDate, notes.NoteTypeJournal, notes.NoteTypeStandup, journalDir); err != nil {
+		fmt.Fprintf(os.Stderr, "⚠ Failed to fix journal cross-reference links: %v\n", err)
 		// Don't fail the command if link fixing fails
 	}
 
@@ -909,4 +943,242 @@ func classifyAndResolveLinks(allLinks []markdown.Link, fileDate time.Time, noteT
 	needsUpdate := links.FilterNeedsUpdate(resolved)
 
 	return needsUpdate, nil
+}
+
+// formatDestination formats a date as a link destination
+func formatDestination(date time.Time, targetType notes.NoteType, targetDir string) string {
+	dateStr := date.Format(notes.DateFormat) + ".md"
+	// Use relative path to target directory
+	return filepath.Join("..", string(targetType), dateStr)
+}
+
+// fixPreviousLinks finds the previous note and updates its "next" links to point to the current date
+func fixPreviousLinks(currentDate time.Time, noteType notes.NoteType, noteDir string) error {
+	// Find previous day's note
+	previousDate := currentDate.AddDate(0, 0, -1)
+	prevNotePath, err := notes.FindNoteByDate(previousDate, noteType, noteDir, cfg.SearchWindowDays)
+	if err != nil {
+		// No previous note found - this is fine
+		fmt.Println("No previous note found to update")
+		return nil
+	}
+
+	// Verify this is actually the previous day, not a much older fallback
+	foundDate, err := notes.ParseDateFromFilename(prevNotePath)
+	if err != nil {
+		return fmt.Errorf("failed to parse date from previous note filename: %w", err)
+	}
+
+	// Check if the found note is within a reasonable range (e.g., within last 7 days)
+	daysDiff := int(currentDate.Sub(foundDate).Hours() / 24)
+	if daysDiff > 7 {
+		fmt.Printf("Previous note is %d days old, skipping link update\n", daysDiff)
+		return nil
+	}
+
+	fmt.Printf("Found previous note: %s\n", filepath.Base(prevNotePath))
+
+	// Parse the file
+	parser := markdown.NewParser()
+	doc, err := parser.ParseFile(prevNotePath)
+	if err != nil {
+		return fmt.Errorf("failed to parse previous note: %w", err)
+	}
+
+	// Extract and classify links
+	allLinks := doc.ExtractLinks()
+	if len(allLinks) == 0 {
+		fmt.Println("No links found in previous note")
+		return nil
+	}
+
+	classifier := links.NewClassifier(cfg)
+	classified := classifier.ClassifyAll(allLinks)
+
+	// Filter to only "next" links that need fixing
+	var nextLinks []links.ClassifiedLink
+	for _, c := range classified {
+		if c.NeedsFixing() && c.IsNextLink() {
+			nextLinks = append(nextLinks, c)
+		}
+	}
+
+	if len(nextLinks) == 0 {
+		fmt.Println("No 'next' links to update in previous note")
+		return nil
+	}
+
+	// Manually check which "next" links need updating to point to currentDate
+	var needsUpdate []links.ResolvedLink
+	currentDateStr := currentDate.Format(notes.DateFormat)
+
+	for _, classified := range nextLinks {
+		// Get the target note type from the link
+		targetType := classified.TargetNoteType
+		if targetType == "" {
+			targetType = string(noteType)
+		}
+
+		// Get current destination date from the link
+		currentDest := classified.Link.GetDateFromDestination()
+
+		// If it doesn't point to currentDate, it needs updating
+		if currentDest != currentDateStr {
+			// Get directory for target note type
+			var dir string
+			var err error
+			if targetType == string(notes.NoteTypeJournal) {
+				dir, err = cfg.JournalDir()
+			} else {
+				dir, err = cfg.StandupDir()
+			}
+			if err != nil {
+				continue
+			}
+
+			// Build suggested destination
+			suggestedDest := formatDestination(currentDate, notes.NoteType(targetType), dir)
+
+			needsUpdate = append(needsUpdate, links.ResolvedLink{
+				Classified:           classified,
+				ResolvedDate:         currentDate,
+				NeedsUpdate:          true,
+				SuggestedDestination: suggestedDest,
+			})
+		}
+	}
+
+	if len(needsUpdate) == 0 {
+		fmt.Println("All 'next' links in previous note are already correct")
+		return nil
+	}
+
+	fmt.Printf("Updating %d 'next' link(s) in previous note...\n", len(needsUpdate))
+
+	// Apply changes
+	newContent, err := applyLinkFixes(doc, needsUpdate)
+	if err != nil {
+		return fmt.Errorf("failed to apply link fixes to previous note: %w", err)
+	}
+
+	// Write back to file
+	if err := os.WriteFile(prevNotePath, []byte(newContent), 0644); err != nil {
+		return fmt.Errorf("failed to write previous note: %w", err)
+	}
+
+	fmt.Printf("✓ Fixed %d link(s) in %s\n", len(needsUpdate), filepath.Base(prevNotePath))
+	return nil
+}
+
+// fixCrossReferenceLinks finds today's note of targetNoteType and updates its cross-reference
+// links to point to the newly created note of newlyCreatedNoteType
+func fixCrossReferenceLinks(currentDate time.Time, targetNoteType notes.NoteType, newlyCreatedNoteType notes.NoteType, targetDir string) error {
+	// Find today's note of the target type
+	targetNotePath, err := notes.FindNoteByDate(currentDate, targetNoteType, targetDir, cfg.SearchWindowDays)
+	if err != nil {
+		// No target note found - this is fine
+		fmt.Printf("No %s found for today to update\n", targetNoteType)
+		return nil
+	}
+
+	// Verify this is actually today's note, not a fallback to an earlier date
+	foundDate, err := notes.ParseDateFromFilename(targetNotePath)
+	if err != nil {
+		return fmt.Errorf("failed to parse date from target note filename: %w", err)
+	}
+
+	// Compare just the date parts (year, month, day)
+	currentY, currentM, currentD := currentDate.Date()
+	foundY, foundM, foundD := foundDate.Date()
+	if currentY != foundY || currentM != foundM || currentD != foundD {
+		fmt.Printf("No %s found for today (found fallback from earlier date)\n", targetNoteType)
+		return nil
+	}
+
+	fmt.Printf("Found today's %s: %s\n", targetNoteType, filepath.Base(targetNotePath))
+
+	// Parse the file
+	parser := markdown.NewParser()
+	doc, err := parser.ParseFile(targetNotePath)
+	if err != nil {
+		return fmt.Errorf("failed to parse target note: %w", err)
+	}
+
+	// Extract and classify links
+	allLinks := doc.ExtractLinks()
+	if len(allLinks) == 0 {
+		fmt.Println("No links found in target note")
+		return nil
+	}
+
+	classifier := links.NewClassifier(cfg)
+	classified := classifier.ClassifyAll(allLinks)
+
+	// Filter to only cross-reference links that point to the newly created note type
+	var crossRefLinks []links.ClassifiedLink
+	for _, c := range classified {
+		if c.Type == links.LinkTypeCrossReference && c.TargetNoteType == string(newlyCreatedNoteType) {
+			crossRefLinks = append(crossRefLinks, c)
+		}
+	}
+
+	if len(crossRefLinks) == 0 {
+		fmt.Printf("No %s cross-reference links to update\n", newlyCreatedNoteType)
+		return nil
+	}
+
+	// Manually check which cross-reference links need updating to point to currentDate
+	var needsUpdate []links.ResolvedLink
+	currentDateStr := currentDate.Format(notes.DateFormat)
+
+	for _, classified := range crossRefLinks {
+		// Get current destination date from the link
+		currentDest := classified.Link.GetDateFromDestination()
+
+		// If it doesn't point to currentDate, it needs updating
+		if currentDest != currentDateStr {
+			// Get directory for newly created note type
+			var dir string
+			var err error
+			if newlyCreatedNoteType == notes.NoteTypeJournal {
+				dir, err = cfg.JournalDir()
+			} else {
+				dir, err = cfg.StandupDir()
+			}
+			if err != nil {
+				continue
+			}
+
+			// Build suggested destination
+			suggestedDest := formatDestination(currentDate, newlyCreatedNoteType, dir)
+
+			needsUpdate = append(needsUpdate, links.ResolvedLink{
+				Classified:           classified,
+				ResolvedDate:         currentDate,
+				NeedsUpdate:          true,
+				SuggestedDestination: suggestedDest,
+			})
+		}
+	}
+
+	if len(needsUpdate) == 0 {
+		fmt.Printf("All %s cross-reference links are already correct\n", newlyCreatedNoteType)
+		return nil
+	}
+
+	fmt.Printf("Updating %d %s cross-reference link(s)...\n", len(needsUpdate), newlyCreatedNoteType)
+
+	// Apply changes
+	newContent, err := applyLinkFixes(doc, needsUpdate)
+	if err != nil {
+		return fmt.Errorf("failed to apply link fixes to target note: %w", err)
+	}
+
+	// Write back to file
+	if err := os.WriteFile(targetNotePath, []byte(newContent), 0644); err != nil {
+		return fmt.Errorf("failed to write target note: %w", err)
+	}
+
+	fmt.Printf("✓ Fixed %d link(s) in %s\n", len(needsUpdate), filepath.Base(targetNotePath))
+	return nil
 }
